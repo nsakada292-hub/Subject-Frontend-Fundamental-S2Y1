@@ -1,0 +1,340 @@
+﻿E-Commerce Website — Build Specification
+Two React apps against one shared backend REST API: a customer-facing StoreFront and an admin-only Dashboard. This document is the deep-detail feature spec — pair it with the folder structure in the project zip (ecommerce-frontend/, see its README.md).
+V
+________________
+
+
+1. Tech Stack
+* React 18 + Vite (fast dev server, two independent apps)
+* React Router v6 for client-side routing in both apps
+* Tailwind CSS for styling (utility-first, matches the fast iteration a solo/small-team build needs)
+* Axios for API calls, one shared instance per app (services/api.js)
+* Zustand (or React Context, see §7) for cart/wishlist/auth/theme state
+* Recharts in the dashboard for the analytics charts
+* Backend: REST API (e.g. Spring Boot) — see §8 for the suggested contract
+
+
+________________
+
+
+2. Design System
+Fonts
+
+
+* English copy: Lexend (font-en, default)
+* Khmer copy: Kantumruy Pro (font-kh) — apply explicitly to any Khmer text block
+* Both loaded via Google Fonts <link> in index.html (already wired in the scaffold)
+
+
+Color palette — a green→aqua→blue "lagoon" range:
+
+
+Name
+	Hex
+	Suggested use
+	brand.limeGreen
+	#4ce600
+	accents, success states, "in stock"
+	brand.glowGreen
+	#00e000
+	secondary accent, hover glow
+	brand.aqua
+	#00e1ff
+	links, active nav item
+	brand.blue
+	#009dff
+	primary buttons, primary brand color
+	brand.skyBlue
+	#2eaeff
+	gradient midpoint, focus rings
+	
+
+Treat these as a gradient family, not five flat colors dropped everywhere — e.g. bg-lagoon-gradient (defined in storefront/tailwind.config.js) for the home hero and primary CTA buttons, with a single flat brand color for smaller elements like badges or icons. In the dashboard, use the palette sparingly (active sidebar item, chart lines, one accent per stat card) — a dense data-table screen needs more restraint than the storefront.
+
+
+Support both dark and light mode in both apps via a dark class on <html>, toggled through ThemeContext and persisted to localStorage.
+
+
+________________
+
+
+3. Folder Structure
+See the project zip for the actual scaffolded folders/files. Top level:
+
+
+ecommerce-frontend/
+
+
+├── storefront/          # customer app — port 5173
+
+
+├── admin-dashboard/      # admin app — port 5174
+
+
+├── shared/constants/     # brand colors/fonts, copy-pasted into each tailwind.config.js
+
+
+└── README.md
+
+
+Each app follows: components/ (reusable, presentational) → pages/ (one folder per route) → layouts/ (shell around pages) → routes/ (route table) → context/ (global state + matching hooks/) → services/ (one file per backend resource, wraps services/api.js) → utils/. Every major folder in the scaffold has its own README.md stub listing what belongs in it.
+
+
+________________
+
+
+4. StoreFront — Customer App
+4.1 Navbar (global, all pages)
+Persistent top bar with: Home, Women, Men, Beauty, Kid, a search icon/input, a love-list (heart) icon, a bag icon, a dark/light toggle, and a Sign In button (replaced by an account menu once logged in).
+
+
+* Home → navigates to /.
+* Women / Men / Kid each open a hover/click dropdown listing that gender's categories — Clothes, Shoes, Accessories — fetched from GET /api/categories?type=women (etc.) so new categories show up without a frontend deploy. Clicking a top-level nav item itself (not a dropdown row) navigates to that category's full listing page, e.g. /category/women; clicking a dropdown row deep-links to the subcategory, e.g. /category/women/shoes.
+* Beauty works the same way but with Skincare, Haircare, Makeup as its dropdown rows.
+* Search icon expands into a text input; typing triggers GET /api/products?search=... (debounced) and shows a results dropdown or navigates to a /search?q=... results page.
+* Love-list (heart) icon opens the LoveListDrawer — a slide-over panel (components/wishlist/LoveListDrawer.jsx) listing every product the customer has liked, each row with a thumbnail, name, price, and a remove button. Data comes from WishlistContext, backed by GET /api/wishlist.
+* Bag icon opens the BagDrawer — a slide-over panel listing cart line items (thumbnail, name, selected size/color, quantity stepper, line price) and a running total at the bottom, plus a "Checkout" button. Backed by CartContext / GET /api/cart.
+* Dark/light toggle flips ThemeContext.
+* Sign In → /sign-in (see §4.7). Once authenticated, this button becomes the customer's name/avatar with a small menu (Profile, Orders, Log out).
+4.2 Home Page
+* Header/hero: the palette's gradient as background, a headline, and a CTA button that scrolls to or navigates into the product grid (e.g. /category/women or a general /shop).
+* Product section: a grid of ProductCards pulling from GET /api/products?featured=true (or the general product list).
+* Reviews section: a row/carousel of recent customer reviews (GET /api/reviews?featured=true), each showing customer name, star rating, and review text.
+* Footer: standard site links (About, Contact, Shipping, Returns), social icons, newsletter signup — reuse components/layout/Footer.jsx across every page via MainLayout.
+4.3 Category Listing Pages (Women / Men / Kid / Beauty)
+Route: /category/:type and /category/:type/:subcategory.
+
+
+* Filter sidebar (aside, checkbox list) showing that category's subcategories/types — e.g. under Women: ☐ Clothes ☐ Shoes ☐ Accessories; under Beauty: ☐ Skincare ☐ Haircare ☐ Makeup — fetched from the same categories endpoint as the navbar dropdown so the two stay in sync. Checking a box filters the product grid client-side or re-queries GET /api/products?category=women&subcategory=shoes. Support multi-select (check several boxes at once).
+* Consider adding secondary filters here later (price range, size, color) using the same sidebar pattern — not required for v1 but the sidebar component should be built to accept more filter groups.
+* Product grid of ProductCards for the active filters, with pagination or infinite scroll.
+4.4 Product Detail Page
+Route: /product/:id, opened by clicking any ProductCard.
+
+
+* Image gallery, product name, price, size selector, color selector, description, a love-list (heart) toggle, and an Add to Bag button (disabled until size/color are chosen if the product requires them).
+* Adding to bag calls POST /api/cart/items; toggling love calls POST/DELETE /api/wishlist/:productId and updates WishlistContext immediately (optimistic UI) so the heart icon fills without waiting on a full reload.
+* Related products section below the fold: other products in the same category/subcategory as the current one, via GET /api/products/:id/related — rendered as another ProductCard grid, same component as everywhere else.
+* Optionally show that product's reviews here too (ReviewList).
+4.5 Authentication Flow
+Route group under /sign-in, /register, /verify-otp, /forgot-password, /reset-password.
+
+
+1. Sign In page offers Log in (email + password) or a link to Register.
+2. Register: customer enters email (+ name, password). On submit, POST /api/auth/register sends a one-time verification code to that email and the UI moves to the Verify Code step.
+3. Verify Code: a 6-digit OTP input tied to POST /api/auth/verify-otp.
+   * If the verified account's role is customer → log them in and redirect to the storefront home page (or wherever they came from).
+   * If the verified account's role is admin → redirect them out to the admin-dashboard app (VITE_STOREFRONT_URL's sibling env var in the dashboard, or a full URL redirect from here to the dashboard's own login-success route), since admin and storefront are separate deployed apps.
+4. Forgot Password: customer enters their email (POST /api/auth/forgot-password) → receives a reset code → Reset Password page asks for the code + new password (POST /api/auth/reset-password) → on success, re-run OTP verification (step 3) before letting them log in, so a password reset can't be used to skip email verification.
+* Store the auth token (JWT or session) via AuthContext; attach it to every request in services/api.js; on a 401 response, clear auth state and redirect to /sign-in.
+4.6 Dark/Light Mode
+Global ThemeContext + a toggle in the navbar; class-based Tailwind dark mode (dark: variants throughout); persist choice to localStorage and read it on load to avoid a flash of the wrong theme.
+
+
+________________
+
+
+5. Admin Dashboard — Admin App
+Persistent Sidebar (Dashboard, Products, Categories, Orders, Reviews, Customers, Settings, Account) + a Topbar shown on every page.
+5.1 Topbar
+Dark/light mode toggle, a global search input (can route into whichever section matches — e.g. typing a product name jumps into Products search), and a notification bell (order placed, low stock, new review, etc.) with a dropdown list, backed by GET /api/admin/notifications.
+5.2 Dashboard (Overview)
+* Stat cards: total products, total orders, total reviews, total customers — GET /api/admin/dashboard/stats.
+* Charts: e.g. orders-over-time line chart, top categories by sales bar chart — enough to give the admin a shape of the business at a glance, not just raw counts. Use Recharts, styled with one or two brand colors per chart (not the whole palette on one chart).
+* Keep this page read-only — all mutation happens in its own section.
+5.3 Products
+* Search bar (GET /api/admin/products?search=...).
+* Create Product button opens a form (modal or dedicated page) collecting: name, size(s), price, stock, description, category/type, and image upload. POST /api/admin/products (multipart for the image).
+* Table/grid of existing products with Update (pre-filled form, PUT /api/admin/products/:id) and Delete (DELETE /api/admin/products/:id, behind a confirm dialog) actions per row.
+5.4 Categories
+Same pattern as Products: search (GET /api/admin/categories?search=...), Create Category button with a form for name, description, and type/parent (e.g. this category belongs under "Women"), a table of existing categories, and Update/Delete per row. This is the data source that powers the storefront's navbar dropdowns and filter sidebars — changes here show up there without a redeploy.
+5.5 Orders
+* Search by customer name or ID.
+* Table showing customer name, customer ID, that customer's order count, each order's timestamp, and status (e.g. Pending, Processing, Shipped, Delivered, Cancelled) — GET /api/admin/orders?search=....
+* Clicking a row can expand/open an order detail view (line items, shipping address, total) — not strictly requested but the natural next screen; include an OrderDetail sub-view backed by GET /api/admin/orders/:id.
+* Allow updating an order's status from this view (PATCH /api/admin/orders/:id/status).
+5.6 Reviews
+Read-only list of customer reviews — reviewer name, product, rating, comment, date — GET /api/admin/reviews. (Add a delete/hide action later if moderation becomes necessary; not required for v1.)
+5.7 Customers
+* Search by name, ID, or email — GET /api/admin/customers?search=....
+* Table of customers with a "Promote to Admin" action per row (PATCH /api/admin/customers/:id/role) — moves that user from role customer to admin, granting them dashboard access. Confirm this destructive-ish action with a dialog before firing the request.
+5.8 Settings — recommendation
+Since you weren't sure what belongs here, group it into a few clear tabs/sections rather than one long form:
+
+
+* Store Info: store name, logo upload, contact email/phone, address — shown in the storefront footer and order emails.
+* Shipping & Payment: shipping fee rules (flat rate / free over a threshold), accepted payment methods.
+* Notification Preferences: which events trigger a dashboard notification/email (new order, low stock threshold, new review).
+* Appearance: whether the storefront defaults to dark or light mode for new visitors (separate from each visitor's own toggle).
+
+
+Back this with GET/PUT /api/admin/settings, one object with a field per setting, so the whole page saves in one request.
+5.9 Account — recommendation
+This is the logged-in admin's own profile, distinct from Customer management:
+
+
+* Profile card: avatar, name, email, role (e.g. Admin, Super Admin if you want tiers later).
+* Edit profile: update name/avatar (PUT /api/admin/account).
+* Change password: current password + new password (POST /api/admin/account/change-password).
+* Activity/security (optional, nice-to-have): last login time, a "log out of all devices" action.
+5.10 View StoreFront
+A persistent link/button at the bottom of the sidebar (or in the topbar) that opens the storefront app in a new tab — window.open(import.meta.env.VITE_STOREFRONT_URL, "_blank").
+
+
+________________
+
+
+6. Cross-Cutting: Wishlist & Cart Behavior
+* Both drawers (LoveListDrawer, BagDrawer) are global overlays mounted once (e.g. in MainLayout) and opened via context state (isWishlistOpen, isCartOpen), not per-page — so they slide over whatever page the customer is currently on.
+* Keep both in sync with the backend on every mutation, but update local state optimistically first so the UI feels instant.
+* If the customer isn't logged in, decide up front whether cart/wishlist persist to a guest session (localStorage, merged into their account on login) or require sign-in first — worth deciding before you build CartContext, since it changes its shape.
+
+
+________________
+
+
+7. State Management Notes
+* AuthContext, ThemeContext, CartContext, WishlistContext in the storefront; AuthContext, ThemeContext in the dashboard. Plain React Context + useReducer is enough at this scale; reach for Zustand (already in the scaffold's package.json) if prop-drilling or re-render cost becomes a real problem later.
+* Route guards: storefront wraps checkout/account pages in a <RequireAuth>; dashboard wraps its entire route tree in a <RequireAdmin> that also runs on load (redirect to /login if no valid admin session).
+
+
+________________
+
+
+8. Suggested API Contract
+Matches a typical Spring Boot–style REST layout — adjust to your actual backend's routes.
+
+
+Public / customer
+
+
+GET    /api/categories?type=women|men|kid|beauty
+
+
+GET    /api/products?category=&subcategory=&search=&featured=&page=
+
+
+GET    /api/products/:id
+
+
+GET    /api/products/:id/related
+
+
+GET    /api/reviews?productId=&featured=
+
+
+POST   /api/auth/register
+
+
+POST   /api/auth/login
+
+
+POST   /api/auth/verify-otp
+
+
+POST   /api/auth/forgot-password
+
+
+POST   /api/auth/reset-password
+
+
+GET    /api/cart
+
+
+POST   /api/cart/items
+
+
+PATCH  /api/cart/items/:id
+
+
+DELETE /api/cart/items/:id
+
+
+GET    /api/wishlist
+
+
+POST   /api/wishlist/:productId
+
+
+DELETE /api/wishlist/:productId
+
+
+Admin (all behind an admin-role check)
+
+
+GET    /api/admin/dashboard/stats
+
+
+GET    /api/admin/notifications
+
+
+GET    /api/admin/products?search=
+
+
+POST   /api/admin/products
+
+
+PUT    /api/admin/products/:id
+
+
+DELETE /api/admin/products/:id
+
+
+GET    /api/admin/categories?search=
+
+
+POST   /api/admin/categories
+
+
+PUT    /api/admin/categories/:id
+
+
+DELETE /api/admin/categories/:id
+
+
+GET    /api/admin/orders?search=
+
+
+GET    /api/admin/orders/:id
+
+
+PATCH  /api/admin/orders/:id/status
+
+
+GET    /api/admin/reviews
+
+
+GET    /api/admin/customers?search=
+
+
+PATCH  /api/admin/customers/:id/role
+
+
+GET    /api/admin/settings
+
+
+PUT    /api/admin/settings
+
+
+GET    /api/admin/account
+
+
+PUT    /api/admin/account
+
+
+POST   /api/admin/account/change-password
+
+
+________________
+
+
+9. Suggested Build Order
+1. Scaffold both apps (done — see the zip), wire Tailwind + fonts.
+2. Storefront: MainLayout + Navbar (static first, then wire category dropdown to the API) + Footer.
+3. Home page with static/mock product data → swap in real productService calls once the grid renders correctly.
+4. Product detail page + related products.
+5. Category listing page + filter sidebar.
+6. Cart & wishlist context + drawers.
+7. Auth flow (register → OTP → login; forgot/reset password).
+8. Admin dashboard: layout (Sidebar + Topbar) → Dashboard overview → Products → Categories → Orders → Reviews → Customers → Settings → Account.
+9. Wire the admin branch of the OTP flow to redirect into the dashboard app.

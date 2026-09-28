@@ -1,0 +1,15 @@
+{
+    "username": "sakada",
+    "gender": "male",
+    "hobbies": [
+        "walk",
+        "Read",
+        "Play",
+        "Relax"
+    ],
+    "isMarried": false,
+    "rate": {
+        "count": 4.9
+    }
+
+}
